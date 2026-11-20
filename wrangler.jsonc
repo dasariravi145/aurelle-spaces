@@ -1,0 +1,39 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "aurelle-spaces",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2025-02-14",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  "vars": {
+    "ENVIRONMENT": "development",
+    "NEXT_PUBLIC_APP_URL": "http://localhost:3000"
+  }
+  // Planned custom domain route for production deployment (Prompt 20):
+  // "routes": [
+  //   {
+  //     "pattern": "aurelle.dsecops88.online/*",
+  //     "custom_domain": true
+  //   }
+  // ],
+  // Cloudflare D1 Database binding placeholder (to be configured in Prompt 12):
+  // "d1_databases": [
+  //   {
+  //     "binding": "DB",
+  //     "database_name": "aurelle-db",
+  //     "database_id": "<PLACEHOLDER_D1_DATABASE_ID>"
+  //   }
+  // ],
+  // Cloudflare R2 Media Bucket binding placeholder (to be configured in Prompt 13):
+  // "r2_buckets": [
+  //   {
+  //     "binding": "MEDIA_BUCKET",
+  //     "bucket_name": "aurelle-media"
+  //   }
+  // ]
+}
