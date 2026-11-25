@@ -1,0 +1,195 @@
+{
+  "name": "aurelle",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "aurelle",
+        "options": {}
+      },
+      "id": "aur-webhook-001",
+      "name": "Webhook: aurelle",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        180,
+        240
+      ],
+      "webhookId": "aurelle-cloud-webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "const crypto = require('crypto');\n\nconst item = $input.item.json;\nconst headers = item.headers || {};\nconst body = item.body || item;\n\n// Dual-source secret retrieval for n8n Cloud ($vars) and self-hosted ($env)\nconst secret = (typeof $vars !== 'undefined' && $vars.N8N_WEBHOOK_SECRET)\n  ? $vars.N8N_WEBHOOK_SECRET\n  : (typeof $env !== 'undefined' && $env.N8N_WEBHOOK_SECRET)\n  ? $env.N8N_WEBHOOK_SECRET\n  : '';\n\nconst signature = headers['x-aurelle-signature'] || headers['X-Aurelle-Signature'];\nconst timestamp = headers['x-aurelle-timestamp'] || headers['X-Aurelle-Timestamp'];\nconst eventId = headers['x-aurelle-event-id'] || headers['X-Aurelle-Event-ID'];\nconst eventType = headers['x-aurelle-event-type'] || headers['X-Aurelle-Event-Type'];\nconst schemaVersion = headers['x-aurelle-schema-version'] || headers['X-Aurelle-Schema-Version'] || body.schema_version;\n\n// 1. Mandatory server-side secret configuration\nif (!secret || secret.trim().length === 0) {\n  return [{\n    json: {\n      isValid: false,\n      reason: 'N8N_WEBHOOK_SECRET is not configured in n8n Variables/Environment',\n    }\n  }];\n}\n\n// 2. Verify required security headers\nif (!signature || !timestamp || !eventId) {\n  return [{\n    json: {\n      isValid: false,\n      reason: 'Missing required security headers (signature, timestamp, or event-id)',\n    }\n  }];\n}\n\n// 3. Reject expired requests (5-minute maximum tolerance against replays)\nconst occurredMs = new Date(timestamp).getTime();\nconst nowMs = Date.now();\nif (isNaN(occurredMs) || Math.abs(nowMs - occurredMs) > 300000) {\n  return [{\n    json: {\n      isValid: false,\n      reason: 'Request timestamp is expired or outside the 300-second drift tolerance',\n    }\n  }];\n}\n\n// 4. Verify HMAC-SHA256 signature\nconst payloadBytes = Buffer.from(JSON.stringify(body));\nconst expectedHmac = crypto.createHmac('sha256', secret).update(payloadBytes).digest('hex');\nconst signatureValid = (signature.toLowerCase() === expectedHmac.toLowerCase());\n\nif (!signatureValid) {\n  return [{\n    json: {\n      isValid: false,\n      reason: 'HMAC signature verification failed',\n    }\n  }];\n}\n\n// 5. Idempotency & Deduplication defense (sliding window in workflow static data)\nlet isDuplicate = false;\ntry {\n  const staticData = $getWorkflowStaticData('global');\n  const processed = staticData.processedEventIds || [];\n  if (processed.includes(eventId)) {\n    isDuplicate = true;\n  } else {\n    processed.push(eventId);\n    if (processed.length > 250) processed.shift();\n    staticData.processedEventIds = processed;\n  }\n} catch (e) {\n  // In test-execution context where static data is ephemeral\n}\n\nif (isDuplicate) {\n  return [{\n    json: {\n      isValid: false,\n      isDuplicate: true,\n      reason: `Duplicate event detected (${eventId}). Notification skipped.`,\n    }\n  }];\n}\n\n// 6. Payload schema validation\nconst payload = body.payload || {};\nconst isApprovedEvent = (body.event_type === 'enquiry.created' || eventType === 'enquiry.created' || body.event_type === 'chat.lead_qualified');\nconst isVersionMatch = schemaVersion === '1.0.0';\nconst hasValidEmail = typeof payload.client_email === 'string' && payload.client_email.includes('@');\nconst hasClientName = typeof payload.client_name === 'string' && payload.client_name.trim().length > 0;\n\nif (!isApprovedEvent || !isVersionMatch || !hasValidEmail || !hasClientName) {\n  return [{\n    json: {\n      isValid: false,\n      reason: 'Payload failed schema validation (unapproved event, invalid version, or missing contact data)',\n    }\n  }];\n}\n\nreturn [{\n  json: {\n    isValid: true,\n    reason: 'OK',\n    event_id: body.event_id || eventId,\n    event_type: body.event_type || eventType,\n    occurred_at: body.occurred_at || timestamp,\n    enquiry_id: payload.enquiry_id,\n    reference_code: payload.reference_code || `AUR-${String(payload.enquiry_id || '').slice(-6).toUpperCase()}`,\n    source: payload.source || 'ai_chat_assistant',\n    client_name: payload.client_name,\n    client_email: payload.client_email,\n    client_phone: payload.client_phone || null,\n    city: payload.city,\n    project_type: payload.project_type,\n    property_type: payload.property_type || null,\n    approximate_area: payload.approximate_area || null,\n    budget_range: payload.budget_range || null,\n    expected_timeline: payload.expected_timeline || null,\n    project_description: payload.project_description,\n    admin_url: `https://aurelle.dsecops88.online/admin/enquiries/${payload.enquiry_id}`,\n  }\n}];"
+      },
+      "id": "aur-code-verify",
+      "name": "Verify HMAC, Schema & Deduplication",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        400,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.isValid }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "aur-if-valid",
+      "name": "Is Signature & Payload Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        640,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "notifications@aurelle.dsecops88.online",
+        "toEmail": "={{ $vars.STUDIO_NOTIFICATION_EMAIL || $env.STUDIO_NOTIFICATION_EMAIL || 'studio@aurelle.dsecops88.online' }}",
+        "subject": "=New Project Brief: {{ $json.reference_code }} — {{ $json.project_type }} ({{ $json.city }})",
+        "html": "=<div style=\"font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF; border: 1px solid #DCD5CB; border-radius: 4px; overflow: hidden;\"><div style=\"padding: 24px; background: #242522; text-align: center;\"><h2 style=\"margin: 0; color: #F7F4EF; font-weight: 300; letter-spacing: 0.2em; text-transform: uppercase;\">Aurelle Spaces</h2><div style=\"font-size: 11px; color: #A17C55; letter-spacing: 0.15em; text-transform: uppercase; margin-top: 4px;\">Studio Consultation Brief</div></div><div style=\"padding: 30px; font-size: 14px; line-height: 1.6; color: #242522;\"><h3 style=\"margin-top: 0; color: #242522;\">New Consultation Brief Recorded</h3><p>A new architectural inquiry has been recorded through the <strong>{{ $json.source === 'ai_chat_assistant' ? 'Studio AI Concierge' : 'Website Contact Form' }}</strong>.</p><table style=\"width: 100%; border-collapse: collapse; margin: 20px 0; background: #F7F4EF; border-radius: 4px;\"><tr style=\"border-bottom: 1px solid #EAE6DE;\"><td style=\"padding: 8px 12px; color: #8E8F8A; width: 140px;\">Reference Code</td><td style=\"padding: 8px 12px; font-weight: 600;\">{{ $json.reference_code }}</td></tr><tr style=\"border-bottom: 1px solid #EAE6DE;\"><td style=\"padding: 8px 12px; color: #8E8F8A;\">Client Name</td><td style=\"padding: 8px 12px; font-weight: 500;\">{{ $json.client_name }}</td></tr><tr style=\"border-bottom: 1px solid #EAE6DE;\"><td style=\"padding: 8px 12px; color: #8E8F8A;\">Client Email</td><td style=\"padding: 8px 12px;\"><a href=\"mailto:{{ $json.client_email }}\">{{ $json.client_email }}</a></td></tr><tr style=\"border-bottom: 1px solid #EAE6DE;\"><td style=\"padding: 8px 12px; color: #8E8F8A;\">Phone</td><td style=\"padding: 8px 12px;\">{{ $json.client_phone || 'Not provided' }}</td></tr><tr style=\"border-bottom: 1px solid #EAE6DE;\"><td style=\"padding: 8px 12px; color: #8E8F8A;\">Discipline</td><td style=\"padding: 8px 12px;\">{{ $json.project_type }}</td></tr><tr style=\"border-bottom: 1px solid #EAE6DE;\"><td style=\"padding: 8px 12px; color: #8E8F8A;\">Location / City</td><td style=\"padding: 8px 12px;\">{{ $json.city }}</td></tr><tr><td style=\"padding: 8px 12px; color: #8E8F8A;\">Estimated Area</td><td style=\"padding: 8px 12px;\">{{ $json.approximate_area || 'To be determined' }}</td></tr></table><p><strong>Project Overview & Notes:</strong></p><p style=\"background: #EFECE6; padding: 12px; border-radius: 4px; font-style: italic;\">{{ $json.project_description }}</p><div style=\"text-align: center; margin-top: 24px;\"><a href=\"{{ $json.admin_url }}\" style=\"display: inline-block; padding: 12px 24px; background: #242522; color: #F7F4EF; text-decoration: none; border-radius: 3px; font-size: 12px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase;\">Open Dossier in Admin CMS &rarr;</a></div></div></div>",
+        "options": {}
+      },
+      "id": "aur-email-send",
+      "name": "Send Studio Email Notification",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "position": [
+        860,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://aurelle.dsecops88.online/api/automations/callback",
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $vars.AUTOMATION_INTEGRATION_TOKEN || $env.AUTOMATION_INTEGRATION_TOKEN || '' }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "event_id",
+              "value": "={{ $json.event_id }}"
+            },
+            {
+              "name": "workflow_name",
+              "value": "aurelle"
+            },
+            {
+              "name": "entity_id",
+              "value": "={{ $json.enquiry_id }}"
+            },
+            {
+              "name": "purpose",
+              "value": "studio_notification"
+            },
+            {
+              "name": "idempotency_key",
+              "value": "=aurelle_{{ $json.event_id }}"
+            },
+            {
+              "name": "status",
+              "value": "provider_accepted"
+            },
+            {
+              "name": "provider_name",
+              "value": "smtp_studio_relay"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "aur-report-callback",
+      "name": "Report Callback to Aurelle",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1080,
+        220
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook: aurelle": {
+      "main": [
+        [
+          {
+            "node": "Verify HMAC, Schema & Deduplication",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify HMAC, Schema & Deduplication": {
+      "main": [
+        [
+          {
+            "node": "Is Signature & Payload Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Signature & Payload Valid?": {
+      "main": [
+        [
+          {
+            "node": "Send Studio Email Notification",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Send Studio Email Notification": {
+      "main": [
+        [
+          {
+            "node": "Report Callback to Aurelle",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "tags": [
+    {
+      "name": "Aurelle Spaces"
+    },
+    {
+      "name": "Lead Qualification"
+    }
+  ]
+}

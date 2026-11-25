@@ -1,6 +1,7 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "aurelle-spaces",
+  "account_id": "6d9c256a3558f04617930aa62f12f767",
   "main": ".open-next/worker.js",
   "compatibility_date": "2025-02-14",
   "compatibility_flags": [
@@ -11,29 +12,33 @@
     "binding": "ASSETS"
   },
   "vars": {
-    "ENVIRONMENT": "development",
-    "NEXT_PUBLIC_APP_URL": "http://localhost:3000"
-  }
-  // Planned custom domain route for production deployment (Prompt 20):
-  // "routes": [
-  //   {
-  //     "pattern": "aurelle.dsecops88.online/*",
-  //     "custom_domain": true
-  //   }
-  // ],
-  // Cloudflare D1 Database binding placeholder (to be configured in Prompt 12):
-  // "d1_databases": [
-  //   {
-  //     "binding": "DB",
-  //     "database_name": "aurelle-db",
-  //     "database_id": "<PLACEHOLDER_D1_DATABASE_ID>"
-  //   }
-  // ],
-  // Cloudflare R2 Media Bucket binding placeholder (to be configured in Prompt 13):
+    "ENVIRONMENT": "production",
+    "NEXT_PUBLIC_APP_URL": "https://aurelle.dsecops88.online"
+  },
+  // Cloudflare D1 Database binding
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "aurelle-db",
+      "database_id": "3d642230-9e18-47c3-955a-7b9a8b8060dc"
+    }
+  ],
+  // Cloudflare R2 Media Storage Bucket binding (requires R2 OAuth scope or bucket created in Cloudflare dashboard):
   // "r2_buckets": [
   //   {
   //     "binding": "MEDIA_BUCKET",
   //     "bucket_name": "aurelle-media"
   //   }
-  // ]
+  // ],
+  // Scheduled Cron trigger for outbox processing (activated in Prompt 20):
+  // "triggers": {
+  //   "crons": ["*/5 * * * *"]
+  // }
+  // Custom domain route for production deployment:
+  "routes": [
+    {
+      "pattern": "aurelle.dsecops88.online",
+      "custom_domain": true
+    }
+  ]
 }

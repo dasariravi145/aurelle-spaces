@@ -1,0 +1,252 @@
+{
+  "name": "Aurelle Spaces — Customer Enquiry Acknowledgement",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "customer-acknowledgement",
+        "options": {}
+      },
+      "id": "a1103c88-6621-4d1a-bf90-2810a9911002",
+      "name": "Webhook: enquiry.created",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        180,
+        240
+      ],
+      "webhookId": "aurelle-customer-acknowledgement"
+    },
+    {
+      "parameters": {
+        "jsCode": "const crypto = require('crypto');\n\nconst item = $input.item.json;\nconst headers = item.headers || {};\nconst body = item.body || item;\nconst secret = $env.N8N_WEBHOOK_SECRET || '';\n\nconst signature = headers['x-aurelle-signature'] || headers['X-Aurelle-Signature'];\nconst timestamp = headers['x-aurelle-timestamp'] || headers['X-Aurelle-Timestamp'];\nconst eventId = headers['x-aurelle-event-id'] || headers['X-Aurelle-Event-ID'];\n\n// 1. Header checks\nif (!signature || !timestamp || !eventId) {\n  return [{ json: { isValid: false, reason: 'Missing cryptographic signature headers' } }];\n}\n\n// 2. Reject expired requests (300 seconds tolerance)\nconst occurredMs = new Date(timestamp).getTime();\nif (isNaN(occurredMs) || Math.abs(Date.now() - occurredMs) > 300000) {\n  return [{ json: { isValid: false, reason: 'Timestamp drift exceeds 300 seconds' } }];\n}\n\n// 3. HMAC-SHA256 verification\nlet signatureValid = false;\nif (secret) {\n  const payloadBytes = Buffer.from(JSON.stringify(body));\n  const expectedHmac = crypto.createHmac('sha256', secret).update(payloadBytes).digest('hex');\n  signatureValid = (signature.toLowerCase() === expectedHmac.toLowerCase());\n} else {\n  signatureValid = Boolean($env.NODE_ENV !== 'production');\n}\n\nconst payload = body.payload || {};\nconst emailRegex = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/;\nconst hasValidEmail = typeof payload.client_email === 'string' && emailRegex.test(payload.client_email.trim());\n\nreturn [{\n  json: {\n    isValid: signatureValid && hasValidEmail,\n    reason: !signatureValid ? 'Invalid signature' : !hasValidEmail ? 'Invalid client email address' : 'OK',\n    event_id: body.event_id || eventId,\n    enquiry_id: payload.enquiry_id,\n    reference_code: payload.reference_code || `AUR-${String(payload.enquiry_id || '').slice(-6).toUpperCase()}`,\n    client_name: (payload.client_name || '').trim(),\n    client_email: (payload.client_email || '').trim().toLowerCase(),\n    idempotency_key: `cust_ack_${payload.enquiry_id}`,\n  }\n}];"
+      },
+      "id": "b2204d99-7732-4e2b-cf01-3921ba022113",
+      "name": "Verify Signature & Email Format",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        400,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://aurelle.dsecops88.online/api/automations/callback?check_only=true",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.AUTOMATION_INTEGRATION_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "idempotency_key",
+              "value": "={{ $json.idempotency_key }}"
+            },
+            {
+              "name": "entity_id",
+              "value": "={{ $json.enquiry_id }}"
+            },
+            {
+              "name": "status",
+              "value": "attempted"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "c3315e00-8843-4f3c-df12-4032cb133224",
+      "name": "Durable Idempotency Check",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        620,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.alreadyDelivered }}",
+              "value2": false
+            }
+          ]
+        }
+      },
+      "id": "d4426f11-9954-4a4d-ef23-5143dc244335",
+      "name": "Already Acknowledged?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        840,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "notifications@aurelle.dsecops88.online",
+        "toEmail": "={{ $('Verify Signature & Email Format').item.json.client_email }}",
+        "subject": "We've received your enquiry | Aurelle Spaces",
+        "text": "=Hello {{ $('Verify Signature & Email Format').item.json.client_name ? $('Verify Signature & Email Format').item.json.client_name : '' }},\n\nThank you for contacting Aurelle Spaces.\n\nWe have received your project enquiry and appreciate you sharing your requirements.\n\nOur team can review the information provided and contact you regarding the next steps.\n\nRegards,\nAurelle Spaces",
+        "html": "=<div style=\"font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF; border: 1px solid #E6DED5; border-radius: 4px; overflow: hidden;\"><div style=\"padding: 32px 40px; background: #1A1615; text-align: center;\"><div style=\"font-size: 20px; font-weight: 300; letter-spacing: 0.25em; text-transform: uppercase; color: #FAF8F5;\">Aurelle Spaces</div><div style=\"font-size: 11px; letter-spacing: 0.15em; text-transform: uppercase; color: #A17C55; margin-top: 4px;\">Bespoke Architectural Studio</div></div><div style=\"padding: 40px; font-size: 15px; line-height: 1.65; color: #2C2623;\"><p>Hello {{ $('Verify Signature & Email Format').item.json.client_name ? $('Verify Signature & Email Format').item.json.client_name : '' }},</p><p>Thank you for contacting Aurelle Spaces.</p><p>We have received your project enquiry and appreciate you sharing your requirements.</p><p>Our team can review the information provided and contact you regarding the next steps.</p><br><p>Regards,<br><strong>Aurelle Spaces</strong></p></div><div style=\"padding: 24px 40px; background: #FAF8F5; border-top: 1px solid #E6DED5; text-align: center; font-size: 12px; color: #6E6259;\">Aurelle Spaces — Hyderabad & Bangalore · <a href=\"https://aurelle.dsecops88.online\" style=\"color: #A17C55; text-decoration: none;\">aurelle.dsecops88.online</a></div></div>",
+        "options": {}
+      },
+      "id": "e5537a22-aa65-4b5e-f034-6254ed355446",
+      "name": "Send Customer Acknowledgement",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "position": [
+        1060,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://aurelle.dsecops88.online/api/automations/callback",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.AUTOMATION_INTEGRATION_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "event_id",
+              "value": "={{ $('Verify Signature & Email Format').item.json.event_id }}"
+            },
+            {
+              "name": "workflow_name",
+              "value": "customer-acknowledgement"
+            },
+            {
+              "name": "entity_id",
+              "value": "={{ $('Verify Signature & Email Format').item.json.enquiry_id }}"
+            },
+            {
+              "name": "purpose",
+              "value": "customer_acknowledgement"
+            },
+            {
+              "name": "idempotency_key",
+              "value": "={{ $('Verify Signature & Email Format').item.json.idempotency_key }}"
+            },
+            {
+              "name": "status",
+              "value": "provider_accepted"
+            },
+            {
+              "name": "provider_name",
+              "value": "smtp_client_relay"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "f6648b33-bb76-4c6f-0145-7365fe466557",
+      "name": "Record Acknowledged Outcome",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1280,
+        220
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook: enquiry.created": {
+      "main": [
+        [
+          {
+            "node": "Verify Signature & Email Format",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify Signature & Email Format": {
+      "main": [
+        [
+          {
+            "node": "Durable Idempotency Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Durable Idempotency Check": {
+      "main": [
+        [
+          {
+            "node": "Already Acknowledged?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Already Acknowledged?": {
+      "main": [
+        [
+          {
+            "node": "Send Customer Acknowledgement",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Customer Acknowledgement": {
+      "main": [
+        [
+          {
+            "node": "Record Acknowledged Outcome",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "1.0.0",
+  "meta": {
+    "instanceId": "aurelle-n8n-instance"
+  },
+  "tags": [
+    {
+      "name": "Aurelle Spaces"
+    },
+    {
+      "name": "Customer Acknowledgement"
+    }
+  ]
+}
+

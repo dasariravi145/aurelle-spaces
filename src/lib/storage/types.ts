@@ -1,20 +1,36 @@
 /**
- * Cloudflare R2 Media Storage Layer Contracts
- * Compatible with Cloudflare Workers R2 platform binding (`env.MEDIA_BUCKET`).
+ * Aurelle Spaces — Storage Types & Metadata Contracts
  */
 
-export interface UploadMediaResult {
-  key: string;
-  url: string;
+export interface MediaUploadRequest {
+  filename: string;
+  mimeType: string;
   sizeBytes: number;
-  contentType: string;
-  uploadedAt: string;
+  width?: number;
+  height?: number;
+  altText?: string;
+  category: "projects" | "journal" | "general" | "private";
+  slug?: string;
 }
 
-export interface R2ObjectHeader {
+export interface StoredMediaMetadata {
+  id: string;
+  key: string;
+  originalFilename: string;
+  mimeType: string;
+  sizeBytes: number;
+  width: number | null;
+  height: number | null;
+  altText: string;
+  isPublic: boolean;
+  publicUrl: string | null;
+  createdAt: string;
+}
+
+export interface StorageFileDescriptor {
   key: string;
   size: number;
   etag: string;
-  uploaded: Date;
+  uploadedAt: Date;
+  mimeType?: string;
 }
-

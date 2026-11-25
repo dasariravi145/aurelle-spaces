@@ -1,0 +1,196 @@
+{
+  "name": "Aurelle Spaces — Lead Assignment Notification",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "enquiry-assigned",
+        "options": {}
+      },
+      "id": "b1012a11-1122-4a33-bc44-110022334455",
+      "name": "Webhook: enquiry.assigned",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        180,
+        240
+      ],
+      "webhookId": "aurelle-enquiry-assigned"
+    },
+    {
+      "parameters": {
+        "jsCode": "const crypto = require('crypto');\n\nconst item = $input.item.json;\nconst headers = item.headers || {};\nconst body = item.body || item;\nconst secret = $env.N8N_WEBHOOK_SECRET || '';\n\nconst signature = headers['x-aurelle-signature'] || headers['X-Aurelle-Signature'];\nconst timestamp = headers['x-aurelle-timestamp'] || headers['X-Aurelle-Timestamp'];\nconst eventId = headers['x-aurelle-event-id'] || headers['X-Aurelle-Event-ID'];\nconst eventType = headers['x-aurelle-event-type'] || headers['X-Aurelle-Event-Type'];\n\nif (!signature || !timestamp || !eventId) {\n  return [{ json: { isValid: false, reason: 'Missing cryptographic signature headers' } }];\n}\n\n// 5-minute replay drift check\nconst occurredMs = new Date(timestamp).getTime();\nif (isNaN(occurredMs) || Math.abs(Date.now() - occurredMs) > 300000) {\n  return [{ json: { isValid: false, reason: 'Timestamp outside 300s window' } }];\n}\n\n// HMAC validation\nlet signatureValid = false;\nif (secret) {\n  const payloadBytes = Buffer.from(JSON.stringify(body));\n  const expectedHmac = crypto.createHmac('sha256', secret).update(payloadBytes).digest('hex');\n  signatureValid = (signature.toLowerCase() === expectedHmac.toLowerCase());\n} else {\n  signatureValid = Boolean($env.NODE_ENV !== 'production');\n}\n\nconst payload = body.payload || {};\nconst isAssignedEvent = (body.event_type === 'enquiry.assigned' || eventType === 'enquiry.assigned');\nconst emailRegex = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/;\nconst hasValidEmail = typeof payload.assigned_admin_email === 'string' && emailRegex.test(payload.assigned_admin_email.trim());\n\nreturn [{\n  json: {\n    isValid: signatureValid && isAssignedEvent && hasValidEmail,\n    reason: !signatureValid ? 'Invalid signature' : !isAssignedEvent ? 'Invalid event type' : !hasValidEmail ? 'Invalid admin email' : 'OK',\n    event_id: body.event_id || eventId,\n    enquiry_id: payload.enquiry_id,\n    reference_code: payload.reference_code || `AUR-${String(payload.enquiry_id || '').slice(-6).toUpperCase()}`,\n    assigned_admin_id: payload.assigned_admin_id,\n    assigned_admin_name: payload.assigned_admin_name || 'Architect',\n    assigned_admin_email: payload.assigned_admin_email,\n    assigned_by_name: payload.assigned_by_name || null,\n    project_type: payload.project_type || 'General',\n    city: payload.city || 'Hyderabad / Bangalore',\n    assigned_at: payload.assigned_at || timestamp,\n    admin_url: `https://aurelle.dsecops88.online/admin/enquiries/${payload.enquiry_id}`,\n  }\n}];"
+      },
+      "id": "c2123b22-2233-4b44-cd55-221133445566",
+      "name": "Verify Signature & Assignee",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        400,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.isValid }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "d3234c33-3344-4c55-de66-332244556677",
+      "name": "Is Valid Assignment?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        620,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "notifications@aurelle.dsecops88.online",
+        "toEmail": "={{ $json.assigned_admin_email }}",
+        "subject": "Project Assigned: Enquiry {{ $json.reference_code }} ({{ $json.project_type }}, {{ $json.city }})",
+        "text": "=Hello {{ $json.assigned_admin_name }},\n\nYou have been assigned to oversee the consultation brief {{ $json.reference_code }}{{ $json.assigned_by_name ? ' by ' + $json.assigned_by_name : '' }}.\n\nProject Type: {{ $json.project_type }}\nLocation: {{ $json.city }}\nAssigned At: {{ $json.assigned_at }}\n\nAccess the complete client brief in the studio dashboard:\n{{ $json.admin_url }}\n\n(Confidential studio record. Login required.)",
+        "html": "=<div style=\"font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF; border: 1px solid #E6DED5; border-radius: 4px; overflow: hidden;\"><div style=\"padding: 24px; background: #1A1615; text-align: center;\"><h2 style=\"margin: 0; color: #FAF8F5; font-weight: 300; letter-spacing: 0.2em; text-transform: uppercase;\">Aurelle Spaces</h2><div style=\"font-size: 11px; color: #A17C55; letter-spacing: 0.15em; text-transform: uppercase; margin-top: 4px;\">Lead Assignment Dispatch</div></div><div style=\"padding: 30px; font-size: 14px; line-height: 1.6; color: #2C2623;\"><h3 style=\"margin-top: 0; color: #1A1615;\">Consultation Brief Assigned</h3><p>Hello {{ $json.assigned_admin_name }},</p><p>You have been assigned to lead project enquiry <strong>{{ $json.reference_code }}</strong>{{ $json.assigned_by_name ? ' by ' + $json.assigned_by_name : '' }}.</p><table style=\"width: 100%; border-collapse: collapse; margin: 20px 0; background: #FAF8F5;\"><tr style=\"border-bottom: 1px solid #EFEAE3;\"><td style=\"padding: 8px 12px; color: #6E6259;\">Reference</td><td style=\"padding: 8px 12px; font-weight: 600;\">{{ $json.reference_code }}</td></tr><tr style=\"border-bottom: 1px solid #EFEAE3;\"><td style=\"padding: 8px 12px; color: #6E6259;\">Project Type</td><td style=\"padding: 8px 12px;\">{{ $json.project_type }}</td></tr><tr style=\"border-bottom: 1px solid #EFEAE3;\"><td style=\"padding: 8px 12px; color: #6E6259;\">City</td><td style=\"padding: 8px 12px;\">{{ $json.city }}</td></tr><tr><td style=\"padding: 8px 12px; color: #6E6259;\">Assigned At</td><td style=\"padding: 8px 12px;\">{{ $json.assigned_at }}</td></tr></table><div style=\"text-align: center; margin-top: 24px;\"><a href=\"{{ $json.admin_url }}\" style=\"display: inline-block; padding: 12px 24px; background: #1A1615; color: #FAF8F5; text-decoration: none; border-radius: 3px; font-size: 12px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase;\">View Client Dossier</a></div></div></div>",
+        "options": {}
+      },
+      "id": "e4345d44-4455-4d66-ef77-443355667788",
+      "name": "Send Staff Assignment Alert",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "position": [
+        860,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://aurelle.dsecops88.online/api/automations/callback",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.AUTOMATION_INTEGRATION_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "event_id",
+              "value": "={{ $json.event_id }}"
+            },
+            {
+              "name": "workflow_name",
+              "value": "lead-assignment-notification"
+            },
+            {
+              "name": "entity_id",
+              "value": "={{ $json.enquiry_id }}"
+            },
+            {
+              "name": "purpose",
+              "value": "lead_assignment"
+            },
+            {
+              "name": "idempotency_key",
+              "value": "=assign_{{ $json.event_id }}"
+            },
+            {
+              "name": "status",
+              "value": "provider_accepted"
+            },
+            {
+              "name": "provider_name",
+              "value": "smtp_internal_relay"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "f5456e55-5566-4e77-fa88-554466778899",
+      "name": "Report Outcome",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1100,
+        220
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook: enquiry.assigned": {
+      "main": [
+        [
+          {
+            "node": "Verify Signature & Assignee",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify Signature & Assignee": {
+      "main": [
+        [
+          {
+            "node": "Is Valid Assignment?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Valid Assignment?": {
+      "main": [
+        [
+          {
+            "node": "Send Staff Assignment Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Staff Assignment Alert": {
+      "main": [
+        [
+          {
+            "node": "Report Outcome",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "1.0.0",
+  "meta": {
+    "instanceId": "aurelle-n8n-instance"
+  },
+  "tags": [
+    {
+      "name": "Aurelle Spaces"
+    },
+    {
+      "name": "Lead Assignment"
+    }
+  ]
+}
+

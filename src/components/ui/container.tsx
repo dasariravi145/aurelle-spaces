@@ -4,35 +4,34 @@ export interface ContainerProps extends React.HTMLAttributes<HTMLDivElement> {
   children: React.ReactNode;
   className?: string;
   as?: React.ElementType;
-  size?: "sm" | "md" | "lg" | "xl" | "full";
+  size?: "reading" | "standard" | "wide" | "max" | "full";
 }
 
 const sizeClasses = {
-  sm: "max-w-3xl",
-  md: "max-w-5xl",
-  lg: "max-w-7xl",
-  xl: "max-w-[1400px]",
+  reading: "max-w-[680px]",
+  standard: "max-w-[1120px]",
+  wide: "max-w-[1360px]",
+  max: "max-w-[1536px]",
   full: "max-w-full",
 };
 
 /**
- * Reusable layout container primitive with responsive horizontal padding and standard maximum widths.
+ * Responsive layout container primitive adhering to canonical spatial gutters.
  */
 export function Container({
   children,
   className = "",
   as: Component = "div",
-  size = "lg",
+  size = "standard",
   ...props
 }: ContainerProps) {
-  const maxWidth = sizeClasses[size] || sizeClasses.lg;
+  const maxWidth = sizeClasses[size] || sizeClasses.standard;
   return (
     <Component
-      className={`w-full mx-auto px-4 sm:px-6 lg:px-8 ${maxWidth} ${className}`}
+      className={`w-full mx-auto px-4 sm:px-6 lg:px-8 xl:px-12 ${maxWidth} ${className}`}
       {...props}
     >
       {children}
     </Component>
   );
 }
-

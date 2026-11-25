@@ -1,0 +1,192 @@
+{
+  "name": "Aurelle Spaces — Automation Delivery Failure Alert",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "automation-failure-alert",
+        "options": {}
+      },
+      "id": "a1122334-4455-6677-8899-001122334455",
+      "name": "Webhook: automation.delivery_failed",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        180,
+        240
+      ],
+      "webhookId": "aurelle-automation-failure"
+    },
+    {
+      "parameters": {
+        "jsCode": "const crypto = require('crypto');\n\nconst item = $input.item.json;\nconst headers = item.headers || {};\nconst body = item.body || item;\nconst secret = $env.N8N_WEBHOOK_SECRET || '';\n\nconst signature = headers['x-aurelle-signature'] || headers['X-Aurelle-Signature'];\nconst timestamp = headers['x-aurelle-timestamp'] || headers['X-Aurelle-Timestamp'];\nconst eventId = headers['x-aurelle-event-id'] || headers['X-Aurelle-Event-ID'];\n\nif (!signature || !timestamp || !eventId) {\n  return [{ json: { isValid: false, reason: 'Missing cryptographic signature headers' } }];\n}\n\n// 5-minute replay drift check\nconst occurredMs = new Date(timestamp).getTime();\nif (isNaN(occurredMs) || Math.abs(Date.now() - occurredMs) > 300000) {\n  return [{ json: { isValid: false, reason: 'Timestamp drift outside 300s window' } }];\n}\n\n// HMAC validation\nlet signatureValid = false;\nif (secret) {\n  const payloadBytes = Buffer.from(JSON.stringify(body));\n  const expectedHmac = crypto.createHmac('sha256', secret).update(payloadBytes).digest('hex');\n  signatureValid = (signature.toLowerCase() === expectedHmac.toLowerCase());\n} else {\n  signatureValid = Boolean($env.NODE_ENV !== 'production');\n}\n\nconst payload = body.payload || {};\n\n// CRITICAL ANTI-LOOP DEFENSE: Never process failure alerts triggered by failure alerts\nif (payload.failed_event_type === 'automation.delivery_failed' || body.event_type !== 'automation.delivery_failed') {\n  return [{\n    json: {\n      isValid: false,\n      reason: 'Anti-loop suppression: Recursive failure alert dropped',\n    }\n  }];\n}\n\nreturn [{\n  json: {\n    isValid: signatureValid,\n    reason: signatureValid ? 'OK' : 'Invalid HMAC signature',\n    event_id: body.event_id || eventId,\n    failed_event_id: payload.event_id || eventId,\n    failed_event_type: payload.failed_event_type || 'unknown',\n    failure_category: payload.failure_category || 'max_retries_exceeded',\n    attempt_count: payload.attempt_count || 5,\n    error_summary: (payload.error_summary || 'Delivery retry limit reached').substring(0, 300),\n    failed_at: payload.failed_at || timestamp,\n    monitor_url: payload.monitor_url || 'https://aurelle.dsecops88.online/admin/automations',\n    recipient_email: $env.ALERT_RECIPIENT_EMAIL || 'alerts@aurelle.dsecops88.online',\n  }\n}];"
+      },
+      "id": "b2233445-5566-7788-99aa-112233445566",
+      "name": "Verify Signature & Anti-Loop Guard",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        400,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.isValid }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "c3344556-6677-8899-aabb-223344556677",
+      "name": "Is Non-Recursive Valid Alert?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        620,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "notifications@aurelle.dsecops88.online",
+        "toEmail": "={{ $json.recipient_email }}",
+        "subject": "CRITICAL: Automation Delivery Failure — {{ $json.failure_category }} ({{ $json.failed_event_type }})",
+        "text": "=CRITICAL: Automation Outbox Delivery Failure\n\nEvent ID: {{ $json.failed_event_id }}\nFailed Event Type: {{ $json.failed_event_type }}\nFailure Category: {{ $json.failure_category }}\nAttempts: {{ $json.attempt_count }}\nFailed At: {{ $json.failed_at }}\n\nError Summary:\n{{ $json.error_summary }}\n\nReview and manual retry in Studio Dashboard:\n{{ $json.monitor_url }}\n\n(Anti-loop protection active. This alert will not cascade.)",
+        "html": "=<div style=\"font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; background: #FFFFFF; border: 1px solid #E6DED5; border-radius: 4px; overflow: hidden;\"><div style=\"padding: 24px; background: #A83E3E; text-align: center;\"><h2 style=\"margin: 0; color: #FAF8F5; font-weight: 400; letter-spacing: 0.15em; text-transform: uppercase;\">Aurelle Spaces</h2><div style=\"font-size: 11px; color: #FAF8F5; letter-spacing: 0.1em; text-transform: uppercase; margin-top: 4px;\">Automation Alert · Dead Letter</div></div><div style=\"padding: 30px; font-size: 14px; line-height: 1.6; color: #2C2623;\"><h3 style=\"margin-top: 0; color: #A83E3E;\">Outbound Delivery Attempts Exhausted</h3><p>An outbox event has exceeded maximum retries and entered <em>dead_letter</em> status.</p><table style=\"width: 100%; border-collapse: collapse; margin: 20px 0; background: #FAF8F5;\"><tr style=\"border-bottom: 1px solid #EFEAE3;\"><td style=\"padding: 8px 12px; color: #6E6259;\">Event ID</td><td style=\"padding: 8px 12px; font-family: monospace;\">{{ $json.failed_event_id }}</td></tr><tr style=\"border-bottom: 1px solid #EFEAE3;\"><td style=\"padding: 8px 12px; color: #6E6259;\">Event Type</td><td style=\"padding: 8px 12px; font-weight: 600;\">{{ $json.failed_event_type }}</td></tr><tr style=\"border-bottom: 1px solid #EFEAE3;\"><td style=\"padding: 8px 12px; color: #6E6259;\">Category</td><td style=\"padding: 8px 12px;\">{{ $json.failure_category }}</td></tr><tr style=\"border-bottom: 1px solid #EFEAE3;\"><td style=\"padding: 8px 12px; color: #6E6259;\">Attempts</td><td style=\"padding: 8px 12px;\">{{ $json.attempt_count }}</td></tr><tr><td style=\"padding: 8px 12px; color: #6E6259;\">Failed At</td><td style=\"padding: 8px 12px;\">{{ $json.failed_at }}</td></tr></table><p><strong>Error Summary:</strong></p><pre style=\"background: #FFF5F5; border: 1px solid #FED7D7; padding: 12px; border-radius: 4px; font-size: 13px; color: #9B2C2C; white-space: pre-wrap;\">{{ $json.error_summary }}</pre><div style=\"text-align: center; margin-top: 24px;\"><a href=\"{{ $json.monitor_url }}\" style=\"display: inline-block; padding: 12px 24px; background: #1A1615; color: #FAF8F5; text-decoration: none; border-radius: 3px; font-size: 12px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase;\">Open Automation Monitor</a></div></div></div>",
+        "options": {}
+      },
+      "id": "d4455667-7788-8899-bbcc-334455667788",
+      "name": "Send Tech Lead Failure Alert",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "position": [
+        840,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://aurelle.dsecops88.online/api/automations/callback",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.AUTOMATION_INTEGRATION_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "event_id",
+              "value": "={{ $json.event_id }}"
+            },
+            {
+              "name": "workflow_name",
+              "value": "automation-failure-alert"
+            },
+            {
+              "name": "entity_id",
+              "value": "={{ $json.failed_event_id }}"
+            },
+            {
+              "name": "purpose",
+              "value": "failure_alert"
+            },
+            {
+              "name": "idempotency_key",
+              "value": "=alert_{{ $json.event_id }}"
+            },
+            {
+              "name": "status",
+              "value": "completed"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "e5566778-8899-99aa-ccdd-445566778899",
+      "name": "Log Alert Outcome",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1060,
+        240
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook: automation.delivery_failed": {
+      "main": [
+        [
+          {
+            "node": "Verify Signature & Anti-Loop Guard",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify Signature & Anti-Loop Guard": {
+      "main": [
+        [
+          {
+            "node": "Is Non-Recursive Valid Alert?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Non-Recursive Valid Alert?": {
+      "main": [
+        [
+          {
+            "node": "Send Tech Lead Failure Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Tech Lead Failure Alert": {
+      "main": [
+        [
+          {
+            "node": "Log Alert Outcome",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "1.0.0",
+  "meta": {
+    "instanceId": "aurelle-n8n-instance"
+  },
+  "tags": [
+    {
+      "name": "Aurelle Spaces"
+    },
+    {
+      "name": "Failure Alert"
+    }
+  ]
+}
+
